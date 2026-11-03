@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Mandelbrot pyramid</title>
+<p id="msg">Installing the Mandelbrot service worker…</p>
+<script>
+  // Install the service worker that computes the pyramid's tiles, then open
+  // Neuroglancer (served from the same origin) with the state in our hash.
+  (async () => {
+    try {
+      await navigator.serviceWorker.register("/mandelbrot_sw.js", { scope: "/" });
+      await navigator.serviceWorker.ready;
+      location.replace("/" + location.hash);
+    } catch (e) {
+      document.getElementById("msg").textContent = "Service worker failed: " + e;
+    }
+  })();
+</script>

@@ -1,0 +1,53 @@
+{
+  "dimensions": {
+    "x": [
+      1,
+      ""
+    ],
+    "y": [
+      1,
+      ""
+    ]
+  },
+  "layers": [
+    {
+      "type": "image",
+      "name": "slot 0",
+      "source": "{base}/data/mandelbrot_pyramid.vzip|vzip:|zarr3:",
+      "shader": "void main() {\n  float v = toNormalized(getDataValue());\n  emitRGB(v == 0.0 ? vec3(0.0) : colormapCubehelix(v));\n}\n",
+      "opacity": 1.0
+    },
+    {
+      "type": "image",
+      "name": "slot 1",
+      "source": "{base}/data/mandelbrot_pyramid.vzip|vzip:|zarr3:",
+      "shader": "void main() {\n  float v = toNormalized(getDataValue());\n  emitRGB(v == 0.0 ? vec3(0.0) : colormapCubehelix(v));\n}\n",
+      "visible": false,
+      "opacity": 1.0
+    },
+    {
+      "type": "image",
+      "name": "slot 2",
+      "source": "{base}/data/mandelbrot_pyramid.vzip|vzip:|zarr3:",
+      "shader": "void main() {\n  float v = toNormalized(getDataValue());\n  emitRGB(v == 0.0 ? vec3(0.0) : colormapCubehelix(v));\n}\n",
+      "visible": false,
+      "opacity": 1.0
+    },
+    {
+      "type": "image",
+      "name": "slot 3",
+      "source": "{base}/data/mandelbrot_pyramid.vzip|vzip:|zarr3:",
+      "shader": "void main() {\n  float v = toNormalized(getDataValue());\n  emitRGB(v == 0.0 ? vec3(0.0) : colormapCubehelix(v));\n}\n",
+      "visible": false,
+      "opacity": 1.0
+    }
+  ],
+  "position": [
+    0,
+    0
+  ],
+  "crossSectionScale": 4500,
+  "crossSectionBackgroundColor": "#000000",
+  "layout": "xy",
+  "showDefaultAnnotations": false
+}
