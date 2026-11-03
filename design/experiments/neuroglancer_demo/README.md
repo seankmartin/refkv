@@ -30,6 +30,67 @@ node design/experiments/neuroglancer_demo/screenshot.mjs design/experiments/out/
 
 ## Mandelbrot deep zoom computed on demand (local, service worker)
 
+### Run it from scratch
+
+You need git, [Node.js](https://nodejs.org) 22.18 or later, [uv](https://docs.astral.sh/uv/)
+and Chrome (or another Chromium browser). Recording a video also needs ffmpeg
+(`brew install ffmpeg` on a Mac).
+
+```bash
+# 1. Get refkv and the vzip-enabled Neuroglancer fork, side by side
+git clone https://github.com/d-v-b/refkv.git
+git clone --branch vzip https://github.com/d-v-b/neuroglancer.git
+
+# 2. Build Neuroglancer (a few minutes)
+(cd neuroglancer && npm install && npm run build)
+
+# 3. Write the archive: metadata only, 11 MB, under a second
+cd refkv
+uv run python design/experiments/neuroglancer_demo/make_mandelbrot_pyramid.py design/experiments/out/ng_pyramid
+
+# 4. Serve it; this prints a URL
+node design/experiments/neuroglancer_demo/serve.mjs design/experiments/out/ng_pyramid \
+  design/experiments/neuroglancer_demo/states/mandelbrot_pyramid.json 8769 \
+  --web design/experiments/neuroglancer_demo/mandelbrot_web --page mandelbrot.html
+```
+
+Open the printed `http://127.0.0.1:8769/mandelbrot.html#!…` URL in Chrome and
+scroll to zoom. Stop the server with Ctrl-C.
+
+**Recording a dive.** With the server running, in a second terminal:
+
+```bash
+(cd ../neuroglancer && npx playwright install chromium)   # once
+node design/experiments/neuroglancer_demo/record_zoom.mjs '<URL printed by serve.mjs>' out/dive
+```
+
+This writes `out/dive/mandelbrot_zoom.mp4`: 30 seconds from the whole set to
+10¹⁵× magnification into Seahorse Valley. Each frame waits for all of its tiles,
+so the video is smooth however long the tiles take to compute. Without ffmpeg
+on the `PATH`, it writes a WebM with the ffmpeg that ships with Playwright.
+
+Other shots are a list of steps: `to:<exp>:<seconds>` zooms smoothly to 10^exp×
+(in or out), and `hold:<seconds>` keeps the picture still. The default is
+`hold:1 to:15:30 hold:1`. To extend a recording without redoing its frames,
+`--from <exp>` moves to a zoom first without recording, and `--start-frame <n>`
+numbers the new frames from n, keeping the earlier ones. For example, to
+continue the default dive deeper and then come back out:
+
+```bash
+node design/experiments/neuroglancer_demo/record_zoom.mjs '<URL>' out/dive \
+  --from 15 --start-frame 930 to:20:20 hold:1 to:0:5 hold:1
+```
+
+**Gotchas.**
+- `serve.mjs` copies the web files when it starts, so restart it after
+  editing `mandelbrot_web/`.
+- Browsers keep a service worker per port. If a tab acts like an older
+  version, reload it once.
+- Each start leaves a copy of the Neuroglancer build in `/tmp/ng-vzip-serve-*`.
+  `rm -rf /tmp/ng-vzip-serve-*` clears them when no server is running.
+
+### How it works
+
 `make_mandelbrot_pyramid.py` writes an 11 MB vzip that holds only metadata: an
 OME-NGFF 0.5 multiscales group of 15 levels (4194304² down to 256² uint8
 pixels, axes `[x, y]`, centred on 0). Each level is a Zarr v3 array of

@@ -20,21 +20,24 @@
   // ---- tile pool ----------------------------------------------------------
   // The service worker sends tile jobs here; a pool of workers computes them.
   // Chrome does not tell the service worker when Neuroglancer abandons a
-  // request, so this page decides what is worth computing from the view:
-  // every tick, jobs whose tiles are out of view (or much finer than the
-  // screen) are parked, and parked jobs whose tiles come back into view are
-  // queued again. A parked job is never answered with made-up pixels; only
-  // when too many pile up are the oldest dropped, which fails their requests.
+  // request, so this page sets priorities from the view instead: every tick,
+  // jobs whose tiles are well outside the view (or much finer than the screen)
+  // are parked. Parked jobs are low priority, not frozen: Neuroglancer may
+  // still be waiting for them (it requests beyond the visible area), so they
+  // run when no in-view work is waiting, on all but RESERVED workers. A
+  // parked job is never answered with made-up pixels; only when too many pile
+  // up are the oldest dropped, which fails their requests.
   const nWorkers = Math.max(2, (navigator.hardwareConcurrency || 4) - 1);
   const idle = [];
   let queue = []; // { id, key, e, x, y, port, t } — worth computing; newest last
   let parked = []; // the same, for tiles nobody is looking at
   const MAX_PARKED = 4000;
-  const running = new Map(); // id -> port
+  const RESERVED = 2; // workers kept free of background work, for the view
+  const running = new Map(); // id -> job
   for (let i = 0; i < nWorkers; i++) {
     const w = new Worker("/mandelbrot_tile_worker.js");
     w.onmessage = ({ data: { id, t, stats } }) => {
-      running.get(id)?.postMessage(t, [t.buffer]);
+      running.get(id)?.port.postMessage(t, [t.buffer]);
       tilesDone++;
       if (stats) lastStats = stats;
       running.delete(id);
@@ -48,13 +51,18 @@
   let tilesDone = 0;
   const counts = { jobs: 0, parkedTotal: 0, revived: 0, dropped: 0 };
   let lastStats = null; // what the most recent tile computation did
+  // Running jobs for tiles that are in view now (a background job can come into view).
+  const foreground = () => [...running.values()].filter((j) => relevant(j)).length;
   function pump() {
-    if (queue.length || running.size) lastBusy = performance.now();
-    while (idle.length && queue.length) {
-      const job = queue.pop(); // newest first: the view has moved on from old ones
-      running.set(job.id, job.port);
+    if (queue.length || foreground()) lastBusy = performance.now();
+    const start = (job) => {
+      running.set(job.id, job);
       idle.pop().postMessage({ id: job.id, e: job.e, x: job.x, y: job.y });
-    }
+    };
+    // In-view work first, newest first: the view has moved on from old jobs.
+    while (idle.length && queue.length) start(queue.pop());
+    // Then off-screen work, on all but RESERVED workers.
+    while (idle.length > RESERVED && parked.length) start(parked.pop());
   }
   // Is this tile worth computing for the current view? Tile (e, X, Y) covers
   // frame pixels [P, P + 256 * 2^k) with k = d + 22 - e and
@@ -70,8 +78,10 @@
     if (2 ** k < scale / 4) return false; // more than two levels finer than the screen
     const [px, py] = viewer.navigationState.position.value;
     const panel = document.querySelector(".neuroglancer-rendered-data-panel");
-    const hw = ((panel?.clientWidth ?? 1000) / 2) * scale * 1.5;
-    const hh = ((panel?.clientHeight ?? 700) / 2) * scale * 1.5;
+    // A square on the panel's larger side, with a 2x margin: Neuroglancer
+    // requests well beyond the visible area.
+    const hw = (Math.max(panel?.clientWidth ?? 1000, panel?.clientHeight ?? 700) / 2) * scale * 2;
+    const hh = hw;
     const x0 = toFrame(BigInt(job.x), frame.ix), y0 = toFrame(BigInt(job.y), frame.iy);
     return x0 < px + hw && x0 + size > px - hw && y0 < py + hh && y0 + size > py - hh;
   }
@@ -98,7 +108,8 @@
     }
   });
   navigator.serviceWorker?.startMessages?.();
-  window.mandelbrotPool = () => ({ workers: nWorkers, queued: queue.length, parked: parked.length, running: running.size, done: tilesDone, last: lastStats, ...counts });
+  window.mandelbrotParked = () => parked.map((j) => ({ e: j.e, x: String(j.x), y: String(j.y) }));
+  window.mandelbrotPool = () => ({ workers: nWorkers, queued: queue.length, parked: parked.length, running: running.size, foreground: foreground(), done: tilesDone, last: lastStats, ...counts });
 
   const STEP = 8; // depth between parent and child
   // Perturbation keeps tiles exact while float64 can hold the pixel size:
@@ -344,8 +355,9 @@
         ? `<span class="flt">float64</span> <span class="dim">· ≤${kilo(st.iters)} iter</span>`
         : `<span class="deep">perturbation</span> <span class="dim">· ${st.bits}-bit ref · ≤${kilo(st.iters)} iter</span>`;
     }
-    const bar = Array.from({ length: nWorkers }, (_, k) => (k < running.size ? "▮" : "▯")).join("");
-    $("#mb-work").innerHTML = `<span class="bar">${bar}</span> <span class="dim">${queue.length} queued · ${parked.length} parked · ${tilesDone.toLocaleString("en")} done</span>`;
+    const fg = foreground(), bg = running.size - fg;
+    const bar = "▮".repeat(fg) + `<span class="dim">${"▮".repeat(bg)}</span>` + "▯".repeat(nWorkers - fg - bg);
+    $("#mb-work").innerHTML = `<span class="bar">${bar}</span> <span class="dim">${queue.length} in view · ${parked.length} off-screen · ${tilesDone.toLocaleString("en")} done</span>`;
     if (!$("#mb-details").hidden) {
       const roles = slots.filter((s) => s.win).map((s) => `${key(s.win) === key(frame) ? "*" : ""}${s.win.d}${s.ready ? "" : "…"}`).join(" ");
       $("#mb-details").textContent = `${key(frame)}\nslots [${roles}] · ${switches.length} switches`;
